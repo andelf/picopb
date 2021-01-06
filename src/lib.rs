@@ -34,7 +34,7 @@ pub enum Error {
     UnexpectedEof,
     InvalidWireType(u8),
     VarintOverflow,
-    InvalidString,
+    InvalidUtf8String,
 }
 
 pub struct PbReader<'a> {
@@ -93,32 +93,50 @@ impl PbReader<'_> {
 
     pub fn next_string(&mut self) -> Result<&str, Error> {
         self.next_bytes()
-            .and_then(|raw| str::from_utf8(raw).map_err(|_| Error::InvalidString))
+            .and_then(|raw| str::from_utf8(raw).map_err(|_| Error::InvalidUtf8String))
     }
 
     pub fn next_embedded_message(&mut self) -> Result<PbReader<'_>, Error> {
         self.next_bytes().map(PbReader::new)
     }
 
+    pub fn next_svarint(&mut self) -> Result<i64, Error> {
+        let val = self.next_varint()?;
+        Ok(varint_to_svarint(val))
+    }
+
     fn peek_next_u8(&self) -> Option<u8> {
-        if self.is_eof() {
-            None
-        } else {
+        if self.has_next() {
             Some(self.buf[self.pos])
+        } else {
+            None
         }
     }
 
     fn next_u8(&mut self) -> Option<u8> {
-        if self.is_eof() {
-            None
-        } else {
+        if self.has_next() {
             let i = self.pos;
             self.pos += 1;
             Some(self.buf[i])
+        } else {
+            None
         }
     }
 
-    fn is_eof(&self) -> bool {
+    fn has_next(&self) -> bool {
+        self.pos < self.buf.len()
+    }
+
+    pub fn is_eof(&self) -> bool {
         self.pos == self.buf.len()
+    }
+}
+
+#[inline]
+fn varint_to_svarint(n: u64) -> i64 {
+    if n & 0b1 == 1 {
+        -((n >> 1) as i64 + 1)
+    } else {
+        (n >> 1) as i64
     }
 }
