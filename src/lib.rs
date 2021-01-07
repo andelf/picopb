@@ -33,8 +33,10 @@ pub enum Error {
     Eof,
     UnexpectedEof,
     InvalidWireType(u8),
+    InvalidFieldNumber(u8),
     VarintOverflow,
     InvalidUtf8String,
+    BufferOverflow,
 }
 
 pub struct PbReader<'a> {
@@ -45,6 +47,10 @@ pub struct PbReader<'a> {
 impl PbReader<'_> {
     pub fn new<'a>(buf: &'a [u8]) -> PbReader<'a> {
         PbReader { buf, pos: 0 }
+    }
+
+    pub fn is_eof(&self) -> bool {
+        self.pos == self.buf.len()
     }
 
     pub fn peek_next_key(&self) -> Result<(u8, WireType), Error> {
@@ -126,9 +132,101 @@ impl PbReader<'_> {
     fn has_next(&self) -> bool {
         self.pos < self.buf.len()
     }
+}
 
-    pub fn is_eof(&self) -> bool {
+pub struct PbWriter<'a> {
+    buf: &'a mut [u8],
+    pos: usize,
+}
+
+impl PbWriter<'_> {
+    pub fn new<'a>(buf: &'a mut [u8]) -> PbWriter<'a> {
+        PbWriter { buf, pos: 0 }
+    }
+
+    pub fn is_eos(&self) -> bool {
         self.pos == self.buf.len()
+    }
+
+    pub fn write_varint(&mut self, value: u64) -> Result<(), Error> {
+        let mut value = value;
+        let fallback_pos = self.pos;
+        if value == 0 {
+            return self.write_u8(0x00);
+        }
+        while value > 0 {
+            self.write_u8(((value & 0x7f) as u8) | 0x80)
+                .map_err(|err| {
+                    self.pos = fallback_pos;
+                    err
+                })?;
+            value >>= 7;
+        }
+        // clean msb of last byte
+        *self.last_u8_mut() &= 0x7f;
+        Ok(())
+    }
+
+    pub fn encode_varint_field(&mut self, field_number: u8, value: u64) -> Result<(), Error> {
+        // if value == 0 {
+        //     return Ok(());
+        // }
+        let key = field_number
+            .checked_shl(3)
+            .ok_or(Error::InvalidFieldNumber(field_number))?
+            + WireType::Varint as u8;
+        self.write_u8(key)?;
+        self.write_varint(value)
+    }
+
+    pub fn encode_svarint_field(&mut self, field_number: u8, value: i64) -> Result<(), Error> {
+        self.encode_varint_field(field_number, svarint_to_varint(value))
+    }
+
+    pub fn encode_bytes_field(&mut self, field_number: u8, value: &[u8]) -> Result<(), Error> {
+        // if value.is_empty() {
+        //     return Ok(())
+        // }
+        let key = field_number
+            .checked_shl(3)
+            .ok_or(Error::InvalidFieldNumber(field_number))?
+            + WireType::Bytes as u8;
+        self.write_u8(key)?;
+        self.write_varint(value.len() as _)?;
+        self.write_bytes(value)
+    }
+
+    pub fn encode_string_field(&mut self, field_number: u8, value: &str) -> Result<(), Error> {
+        self.encode_bytes_field(field_number, value.as_bytes())
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buf[..self.pos]
+    }
+
+    fn write_u8(&mut self, val: u8) -> Result<(), Error> {
+        if self.pos < self.buf.len() {
+            self.buf[self.pos] = val;
+            self.pos += 1;
+            Ok(())
+        } else {
+            Err(Error::BufferOverflow)
+        }
+    }
+
+    fn write_bytes(&mut self, val: &[u8]) -> Result<(), Error> {
+        if self.pos + val.len() < self.buf.len() {
+            self.buf[self.pos..self.pos + val.len()].copy_from_slice(val);
+            self.pos += val.len();
+            Ok(())
+        } else {
+            Err(Error::BufferOverflow)
+        }
+    }
+
+    // Require: buf is not empty.
+    fn last_u8_mut(&mut self) -> &mut u8 {
+        &mut self.buf[self.pos - 1]
     }
 }
 
@@ -139,4 +237,9 @@ fn varint_to_svarint(n: u64) -> i64 {
     } else {
         (n >> 1) as i64
     }
+}
+
+#[inline]
+fn svarint_to_varint(n: i64) -> u64 {
+    ((n << 1) ^ (n >> 63)) as u64
 }
