@@ -70,6 +70,46 @@ impl PbReader<'_> {
         }
     }
 
+    pub fn skip_next_field(&mut self) -> Result<(), Error> {
+        match self.next_key()? {
+            (_, WireType::Varint) => {
+                let _ = self.next_varint()?;
+            }
+            (_, WireType::Bytes) => {
+                let _ = self.next_bytes()?;
+            }
+            (_, WireType::Bit32) => {
+                let _ = self.next_fixed32()?;
+            }
+            (_, WireType::Bit64) => {
+                let _ = self.next_fixed64()?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn next_fixed32(&mut self) -> Result<[u8; 4], Error> {
+        if self.pos + 4 > self.buf.len() {
+            Err(Error::UnexpectedEof)
+        } else {
+            let mut ret = [0u8; 4];
+            ret.copy_from_slice(&self.buf[self.pos..self.pos + 4]);
+            self.pos += 4;
+            Ok(ret)
+        }
+    }
+
+    pub fn next_fixed64(&mut self) -> Result<[u8; 8], Error> {
+        if self.pos + 8 > self.buf.len() {
+            Err(Error::UnexpectedEof)
+        } else {
+            let mut ret = [0u8; 8];
+            ret.copy_from_slice(&self.buf[self.pos..self.pos + 8]);
+            self.pos += 8;
+            Ok(ret)
+        }
+    }
+
     pub fn next_varint(&mut self) -> Result<u64, Error> {
         let mut result = 0;
         let mut bitpos = 0;
