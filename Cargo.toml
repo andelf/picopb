@@ -3,6 +3,14 @@ name = "picopb"
 version = "0.1.0"
 authors = ["Andelf <andelf@gmail.com>"]
 edition = "2018"
+license = "Apache-2.0"
+readme = "README.md"
+description = "no_std protobuf parsing for Rust."
+keywords = ["protobuf", "serialization", "embedded", "no-std"]
+categories = ["encoding"]
+homepage = "https://github.com/andelf/picopb"
+repository = "https://github.com/andelf/picopb"
+documentation = "https://docs.rs/picopb"
 
 [dependencies]
 
